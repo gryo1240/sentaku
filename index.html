@@ -100,6 +100,8 @@ nav.tabs button.on{color:var(--accent); font-weight:700;}
 .who{display:inline-block; width:10px; height:10px; border-radius:50%;}
 .who.a{background:#B4643C;} .who.b{background:#4A7FA5;}
 .who.ab{background:linear-gradient(90deg,#B4643C 50%,#4A7FA5 50%);}
+.thumb{width:44px; height:44px; border-radius:8px; object-fit:cover; border:1px solid var(--line); flex-shrink:0;}
+.thumb.lg{width:72px; height:72px;}
 .typechip{font-size:11px; padding:1px 8px; border-radius:999px; background:var(--chip); color:var(--muted);}
 /* modal */
 .overlay{position:fixed; inset:0; background:rgba(10,16,16,.45); z-index:40; display:flex; align-items:flex-end; justify-content:center;}
@@ -112,9 +114,6 @@ nav.tabs button.on{color:var(--accent); font-weight:700;}
 .seg button.on{background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:700;}
 details{margin-top:8px;}
 details summary{cursor:pointer; font-size:13.5px; padding:4px 0; font-weight:600;}
-.spinner{display:inline-block; width:16px; height:16px; border:2.5px solid var(--accent-soft); border-top-color:var(--accent); border-radius:50%; animation:spin 1s linear infinite; vertical-align:-3px;}
-@keyframes spin{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion: reduce){ .spinner{animation-duration:2.5s;} }
 .article h4{font-size:14px; margin:12px 0 4px;}
 .article p, .article li{font-size:13.5px;}
 .article ul{padding-left:1.3em;}
@@ -138,7 +137,7 @@ details summary{cursor:pointer; font-size:13.5px; padding:4px 0; font-weight:600
   <button data-tab="settings"><span class="ic">⚙️</span>設定</button>
 </div></nav>
 <div id="modal"></div>
-<input type="file" id="camInput" accept="image/*" hidden>
+<input type="file" id="photoInput" accept="image/*" hidden>
 
 <script>
 "use strict";
@@ -267,15 +266,23 @@ function advice(item){
   else if(s.has("tdHigh")) chips.push(["ok","乾燥機OK"]);
   else if(wi.washCat!=="no") chips.push(["","乾燥機表示なし→避けるのが安全"]);
   // 干し方
+  if(s.has("ndLine")) chips.push(["","つり干しでOK"]);
   ["ndLineSh","ndFlatSh"].some(c=>s.has(c)) && chips.push(["ng","陰干し"]);
   s.has("ndFlat")||s.has("ndFlatSh")||s.has("ndWetFlat") ? chips.push(["","平干し(型崩れ防止)"]) : null;
   s.has("ndWetLine")||s.has("ndWetFlat") ? chips.push(["","脱水せず濡れ干し"]) : null;
   // 漂白
   if(s.has("blNo")) chips.push(["ng","漂白NG"]);
   else if(s.has("blO2")) chips.push(["","漂白は酸素系のみ"]);
+  else if(s.has("blAll")) chips.push(["ok","漂白OK(塩素系・酸素系)"]);
   // アイロン
   if(s.has("irNo")) chips.push(["ng","アイロン不可"]);
-  else if(s.has("ir110")) chips.push(["","アイロン低温のみ"]);
+  else if(s.has("ir110")) chips.push(["","アイロンは低温(110℃)まで・スチームNG"]);
+  else if(s.has("ir150")) chips.push(["","アイロンは中温(150℃)まで"]);
+  else if(s.has("ir200")) chips.push(["ok","アイロンOK(高温200℃まで)"]);
+  // クリーニング
+  if(s.has("dcNo")) chips.push(["ng","ドライクリーニング不可"]);
+  else if(s.has("dcP")) chips.push(["ok","クリーニング店に出せる(P)"]);
+  else if(s.has("dcF")) chips.push(["ok","クリーニング店に出せる(F・石油系)"]);
   // タオルと素材の注意
   if(item.type==="towel"){
     warns.push("タオルは糸くずが出るので、服(特に黒い服・化繊)とは分けて洗うのがおすすめ");
@@ -310,13 +317,21 @@ function lintTag(item){ // 糸くずを「出す」「拾う」
 const KEY="sentaku-v1";
 const $=s=>document.querySelector(s);
 function esc(s){ return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function thumbImg(src,lg){ return src?`<img class="thumb${lg?" lg":""}" src="${esc(src)}" alt="${lg?"アイテムの写真":""}">`:""; }
 let S=load();
 function load(){
   try{ const raw=localStorage.getItem(KEY); if(raw){ const s=JSON.parse(raw); if(s&&s.settings) return s; } }catch(e){}
-  return { settings:{cfg:null, rid:null, gemKey:""},
+  return { settings:{cfg:null, rid:null},
            local:{meta:{names:{a:"夫",b:"妻"}}, items:{}}, mirror:null };
 }
-function save(){ localStorage.setItem(KEY, JSON.stringify(S)); }
+let saveFailWarned=false;
+function save(){
+  try{ localStorage.setItem(KEY, JSON.stringify(S)); }
+  catch(e){
+    if(!saveFailWarned){ saveFailWarned=true;
+      alert("端末内の保存容量がいっぱいで、変更を保存できませんでした。写真付きのアイテムを減らすか、写真を外してください。"); }
+  }
+}
 let ROOM=S.local, fbRef=null, connected=false;
 const syncOn=()=>!!(S.settings.cfg && S.settings.rid);
 function names(){ const n=(ROOM.meta&&ROOM.meta.names)||{}; return {a:n.a||"夫", b:n.b||"妻"}; }
@@ -369,50 +384,27 @@ function parseConfig(text){
 }
 function inviteCode(){ return btoa(unescape(encodeURIComponent(JSON.stringify({app:"sentaku", c:S.settings.cfg, r:S.settings.rid})))); }
 
-/* ============ Gemini読み取り ============ */
-const GEM_MODEL="gemini-2.5-flash";
-const GEM_PROMPT = `この写真は衣類やタオルの洗濯表示タグです。写っているJIS洗濯表示記号と素材表示を読み取り、次のJSONだけを返してください(説明文は不要):
-{"sym":["コード"],"mat":"素材表示(例: 綿100%)。読めなければ空文字","type":"towel/clothes/bedding/otherのどれか(推測)","name":"品物の短い呼び名の提案(例: バスタオル)"}
-記号コード一覧: w95=95℃洗い w60=60℃ w50=50℃ w40=40℃標準 w40s=40℃弱(下線1本) w40ss=40℃非常に弱(下線2本) w30=30℃標準 w30s=30℃弱 w30ss=30℃非常に弱 hw=手洗い(桶に手) nw=洗濯不可(桶に×) blAll=漂白OK(三角) blO2=酸素系のみ(三角に斜線2本) blNo=漂白不可(三角に×) tdHigh=タンブル乾燥高温(四角+丸+点2) tdLow=低温(点1) tdNo=乾燥機不可(四角+丸に×) ndLine=つり干し(四角+縦線1) ndLineSh=陰つり干し(左上斜線) ndWetLine=濡れつり干し(縦線2) ndFlat=平干し(横線1) ndFlatSh=陰平干し ndWetFlat=濡れ平干し(横線2) ir200=アイロン高温(点3) ir150=中温(点2) ir110=低温(点1) irNo=アイロン不可 dcP=ドライP dcF=ドライF dcNo=ドライ不可(丸に×)
-洗い方(桶)の記号は必ず1つだけ選ぶこと。はっきり見えない記号は含めないこと。`;
-async function aiReadTag(b64){
-  const key=S.settings.gemKey;
-  const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEM_MODEL}:generateContent?key=${encodeURIComponent(key)}`,{
-    method:"POST", headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({contents:[{parts:[
-      {inline_data:{mime_type:"image/jpeg", data:b64}},
-      {text:GEM_PROMPT}
-    ]}]})
-  });
-  if(!res.ok){
-    const t=await res.text();
-    throw new Error(res.status===400&&/API key/i.test(t)?"APIキーが正しくないようです":"読み取りに失敗しました("+res.status+")");
-  }
-  const j=await res.json();
-  let text=(((j.candidates||[])[0]||{}).content||{}).parts?.map(p=>p.text||"").join("")||"";
-  text=text.replace(/```json|```/g,"").trim();
-  const m=text.match(/\{[\s\S]*\}/); if(!m) throw new Error("読み取り結果を解釈できませんでした");
-  const o=JSON.parse(m[0]);
-  o.sym=(o.sym||[]).filter(c=>SYM[c]);
-  return o;
-}
-function fileToB64(file){
+/* ============ アイテム写真(端末内で縮小して保存) ============ */
+function fileToThumb(file, max){
   return new Promise((resolve,reject)=>{
     const img=new Image();
     img.onload=()=>{
-      const max=1280, sc=Math.min(1, max/Math.max(img.width,img.height));
+      const sc=Math.min(1, max/Math.max(img.width,img.height));
       const cv=document.createElement("canvas");
-      cv.width=Math.round(img.width*sc); cv.height=Math.round(img.height*sc);
+      cv.width=Math.max(1,Math.round(img.width*sc)); cv.height=Math.max(1,Math.round(img.height*sc));
       cv.getContext("2d").drawImage(img,0,0,cv.width,cv.height);
-      resolve(cv.toDataURL("image/jpeg",0.85).split(",")[1]);
+      URL.revokeObjectURL(img.src);
+      resolve(cv.toDataURL("image/jpeg",0.65));
     };
-    img.onerror=reject;
+    img.onerror=()=>{ URL.revokeObjectURL(img.src); reject(new Error("画像を読み込めませんでした")); };
     img.src=URL.createObjectURL(file);
   });
 }
+let photoTarget=null; // "cur" または アイテムid
+function pickPhoto(target){ photoTarget=target; $("#photoInput").click(); }
 
 /* ============ 調べる ============ */
-let cur = {sym:[], mat:"", type:"clothes", name:"", owner:"", editId:null};
+let cur = {sym:[], mat:"", type:"clothes", name:"", owner:"", photo:"", editId:null};
 function setSym(code){
   const g=SYM[code].g;
   const has=cur.sym.includes(code);
@@ -422,11 +414,9 @@ function setSym(code){
 }
 function renderCheck(){
   const el=$("#tab-check");
-  const hasKey=!!S.settings.gemKey;
   let html=`<div class="card"><div class="row">
-    <button class="primary grow" id="btnCam">📷 タグを撮って読み取る</button>
+    <p class="small grow">タグにある記号と同じ絵をタップしてください。選ぶとすぐ下に洗い方が出ます。</p>
     <button class="ghost" id="btnClear">クリア</button></div>
-    <p class="small" style="margin-top:6px" id="camHint">${hasKey?"タグ全体が明るく写るように撮ってください。読み取り後に必ず下の記号で確認・修正できます。":"AI読み取りには設定タブでGemini APIキー(無料)の登録が必要です。今は下から記号を手で選べます。"}</p>
   </div>`;
 
   /* 記号ピッカー */
@@ -469,43 +459,48 @@ function renderCheck(){
         </select>
         <input type="text" id="cMat" placeholder="素材(例: 綿100%)" value="${esc(cur.mat)}" class="grow">
       </div>
+      <div class="row" style="margin-bottom:8px">
+        ${thumbImg(cur.photo,true)}
+        <button class="ghost" id="btnPhoto">📷 ${cur.photo?"写真を撮り直す":"写真を付ける(任意)"}</button>
+        ${cur.photo?`<button class="ghost icon" id="btnPhotoDel">✕</button>`:""}
+      </div>
       <button class="primary" id="btnSave" style="width:100%">${cur.editId?"上書き保存":"クローゼットに保存"}</button>
     </div>`;
   }
   el.innerHTML=html;
   el.querySelectorAll("[data-sym]").forEach(b=>b.onclick=()=>setSym(b.dataset.sym));
-  $("#btnClear").onclick=()=>{ cur={sym:[],mat:"",type:"clothes",name:"",owner:"",editId:null}; renderCheck(); };
-  $("#btnCam").onclick=()=>{
-    if(!S.settings.gemKey){ alert("設定タブでGemini APIキー(無料)を登録すると写真読み取りが使えます。それまでは記号を手で選んでください。"); return; }
-    $("#camInput").click();
+  $("#btnClear").onclick=()=>{ cur={sym:[],mat:"",type:"clothes",name:"",owner:"",photo:"",editId:null}; renderCheck(); };
+  const bp=$("#btnPhoto");
+  if(bp) bp.onclick=()=>{
+    // 入力途中の値を保持してから写真選択へ
+    cur.name=$("#cName").value; cur.type=$("#cType").value; cur.owner=$("#cOwner").value; cur.mat=$("#cMat").value;
+    pickPhoto("cur");
   };
+  const bpd=$("#btnPhotoDel");
+  if(bpd) bpd.onclick=()=>{ cur.photo=""; renderCheck(); };
   const bs=$("#btnSave");
   if(bs) bs.onclick=()=>{
     cur.name=$("#cName").value.trim()||"名前なし";
     cur.type=$("#cType").value; cur.owner=$("#cOwner").value; cur.mat=$("#cMat").value.trim();
     const id=cur.editId||("i"+Date.now()+Math.floor(Math.random()*1e4));
-    mutate(["items",id],{name:cur.name,type:cur.type,owner:cur.owner,mat:cur.mat,sym:cur.sym,created:Date.now()});
-    cur={sym:[],mat:"",type:"clothes",name:"",owner:"",editId:null};
+    const created=cur.editId&&items()[cur.editId]?items()[cur.editId].created:Date.now();
+    mutate(["items",id],{name:cur.name,type:cur.type,owner:cur.owner,mat:cur.mat,sym:cur.sym,photo:cur.photo||"",created});
+    cur={sym:[],mat:"",type:"clothes",name:"",owner:"",photo:"",editId:null};
     tab="closet"; render();
   };
 }
-$("#camInput").addEventListener("change", async e=>{
+$("#photoInput").addEventListener("change", async e=>{
   const f=e.target.files[0]; e.target.value="";
-  if(!f) return;
-  const hint=$("#camHint");
-  if(hint) hint.innerHTML=`<span class="spinner"></span> 読み取り中…(数秒かかります)`;
+  const target=photoTarget; photoTarget=null;   // キャンセル時も含め必ずリセット
+  if(!f||!target) return;
   try{
-    const b64=await fileToB64(f);
-    const o=await aiReadTag(b64);
-    cur.sym=o.sym||[];
-    if(o.mat) cur.mat=o.mat;
-    if(o.type&&["towel","clothes","bedding","other"].includes(o.type)) cur.type=o.type;
-    if(o.name&&!cur.name) cur.name=o.name;
-    renderCheck();
-    if(!cur.sym.length) alert("記号を読み取れませんでした。タグが正面から明るく写るように撮り直すか、手で選んでください。");
-  }catch(err){
-    renderCheck(); alert(err.message||"読み取りに失敗しました");
-  }
+    const url=await fileToThumb(f, 320);
+    if(target==="cur"){ cur.photo=url; renderCheck(); }
+    else if(items()[target]){                    // 選択中に削除されていたら書き込まない
+      mutate(["items",target,"photo"],url);
+      setTimeout(()=>{ if(items()[target]) openItemSheet(target); },100);
+    }
+  }catch(err){ alert(err.message||"写真を読み込めませんでした"); }
 });
 
 /* ============ クローゼット ============ */
@@ -542,6 +537,7 @@ function renderCloset(){
     html+=`<div class="card">`;
     list.forEach(([id,it])=>{
       html+=`<div class="item">
+        ${thumbImg(it.photo)}
         <button class="nm" data-open="${id}">
           <div class="t">${esc(it.name)} <span class="typechip">${TYPE_LABEL[it.type]||"他"}</span> ${it.owner?`<span class="who ${it.owner}"></span>`:""}</div>
           <div class="s">${esc(itemSub(it))}</div>
@@ -564,8 +560,12 @@ function openItemSheet(id){
   const a=advice(it);
   const m=$("#modal");
   m.innerHTML=`<div class="overlay" id="ov"><div class="sheet">
-    <h3>${esc(it.name)} <span class="typechip">${TYPE_LABEL[it.type]||"他"}</span></h3>
-    ${it.mat?`<p class="small">素材: ${esc(it.mat)}</p>`:""}
+    <div class="row" style="align-items:flex-start">
+      ${thumbImg(it.photo,true)}
+      <div class="grow"><h3 style="margin-bottom:2px">${esc(it.name)} <span class="typechip">${TYPE_LABEL[it.type]||"他"}</span></h3>
+      ${it.mat?`<p class="small">素材: ${esc(it.mat)}</p>`:""}</div>
+      <button class="ghost icon" id="iPhoto">📷 ${it.photo?"写真変更":"写真追加"}</button>
+    </div>
     <div class="chips" style="margin-top:8px">${a.chips.map(([cl,t])=>`<span class="chip ${cl}">${esc(t)}</span>`).join("")}</div>
     ${a.warns.map(w=>`<div class="warnbox">⚠ ${esc(w)}</div>`).join("")}
     <details><summary>記号の意味をくわしく見る</summary>
@@ -578,8 +578,9 @@ function openItemSheet(id){
   </div></div>`;
   $("#iClose").onclick=()=>m.innerHTML="";
   $("#ov").onclick=e=>{ if(e.target.id==="ov") m.innerHTML=""; };
+  $("#iPhoto").onclick=()=>pickPhoto(id);
   $("#iEdit").onclick=()=>{
-    cur={sym:[...(it.sym||[])], mat:it.mat||"", type:it.type||"clothes", name:it.name||"", owner:it.owner||"", editId:id};
+    cur={sym:[...(it.sym||[])], mat:it.mat||"", type:it.type||"clothes", name:it.name||"", owner:it.owner||"", photo:it.photo||"", editId:id};
     m.innerHTML=""; tab="check"; render();
     window.scrollTo(0,0);
   };
@@ -603,6 +604,7 @@ function renderWash(){
   all.sort((a,b)=>(b[1].created||0)-(a[1].created||0)).forEach(([id,it])=>{
     html+=`<div class="item">
       <input type="checkbox" data-sel="${id}" ${sel.has(id)?"checked":""}>
+      ${thumbImg(it.photo)}
       <button class="nm" data-open="${id}"><div class="t">${esc(it.name)} <span class="typechip">${TYPE_LABEL[it.type]||"他"}</span></div>
       <div class="s">${esc(itemSub(it))}</div></button>
     </div>`;
@@ -690,20 +692,6 @@ function renderSettings(){
   const n=names(); const sync=syncOn();
   el.innerHTML=`
   <div class="card">
-    <h2 style="margin-top:0">📷 写真読み取り(Gemini APIキー) ${S.settings.gemKey?`<span class="chip ok">設定済み</span>`:`<span class="chip">未設定</span>`}</h2>
-    <input type="text" id="gemKey" placeholder="AIza… で始まるAPIキーを貼り付け" value="${esc(S.settings.gemKey)}" style="width:100%">
-    <div class="row" style="margin-top:6px"><button class="primary" id="gemSave">保存</button></div>
-    <details><summary>無料キーの取り方(約5分)</summary>
-      <ol style="padding-left:1.4em;font-size:13px;margin-top:6px">
-        <li>スマホかPCで aistudio.google.com/apikey を開く(Firebaseと同じGoogleアカウントでOK)</li>
-        <li>「APIキーを作成」を押す(プロジェクトはそのままでOK)</li>
-        <li>表示された AIza… で始まるキーをコピーして上に貼り付け→保存</li>
-      </ol>
-      <p class="small">無料枠(1日あたり十分な回数)内で使えます。キーはこの端末の中だけに保存され、写真はGoogleのAI(Gemini)に読み取りのためだけに送信されます。</p>
-    </details>
-  </div>
-
-  <div class="card">
     <h2 style="margin-top:0">ふたりの名前(持ち主表示用)</h2>
     <div class="row">
       <span class="who a"></span><input type="text" id="nameA" value="${esc(n.a)}" style="width:110px">
@@ -743,7 +731,6 @@ function renderSettings(){
     <textarea id="ioArea" placeholder="書き出し結果 / 読み込み時はここに貼り付け" style="margin-top:8px"></textarea>
   </div>`;
 
-  $("#gemSave").onclick=()=>{ S.settings.gemKey=$("#gemKey").value.trim(); save(); renderSettings(); };
   $("#nameSave").onclick=()=>{ mutate(["meta","names"],{a:$("#nameA").value.trim()||"夫", b:$("#nameB").value.trim()||"妻"}); if(!syncOn()) renderSettings(); };
   if(sync){
     $("#btnInvite").onclick=()=>copyText(inviteCode(), $("#btnInvite"), "✅ コピーしました(相手に送る)");
@@ -792,7 +779,7 @@ function renderSettings(){
     }catch(e){ alert("読み込めませんでした。"); }
   };
   $("#btnReset").onclick=()=>{
-    if(confirm("この端末のデータと設定(APIキー含む)をすべて消します。よろしいですか?")){
+    if(confirm("この端末のデータと設定をすべて消します。よろしいですか?")){
       localStorage.removeItem(KEY); location.reload();
     }
   };
