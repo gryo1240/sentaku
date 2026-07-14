@@ -332,6 +332,8 @@ function save(){
       alert("端末内の保存容量がいっぱいで、変更を保存できませんでした。写真付きのアイテムを減らすか、写真を外してください。"); }
   }
 }
+// 初回公開はローカル保存のみ提供。同期UIはFirebaseの所在・セキュリティルール確認後に解禁予定(2026-07-14)
+const SYNC_UI_ENABLED = false;
 let ROOM=S.local, fbRef=null, connected=false;
 const syncOn=()=>!!(S.settings.cfg && S.settings.rid);
 function names(){ const n=(ROOM.meta&&ROOM.meta.names)||{}; return {a:n.a||"夫", b:n.b||"妻"}; }
@@ -701,8 +703,8 @@ function renderSettings(){
   </div>
 
   <div class="card">
-    <h2 style="margin-top:0">夫婦で同期 ${sync?`<span class="chip ${connected?"ok":""}">${connected?"接続OK":"オフライン"}</span>`:`<span class="chip">未設定</span>`}</h2>
-    ${sync?`
+    <h2 style="margin-top:0">夫婦で同期 <span class="chip">近日公開</span></h2>
+    ${SYNC_UI_ENABLED ? (sync?`
       <p class="small">同期は有効です。もう1台では下の招待コードを「招待コードで参加」に貼り付けてください。</p>
       <div class="row" style="margin-top:8px">
         <button id="btnInvite" class="primary">📋 招待コードをコピー</button>
@@ -718,6 +720,8 @@ function renderSettings(){
         <textarea id="joinArea" placeholder="1台目でコピーした招待コードを貼り付け" style="min-height:70px"></textarea>
         <button id="btnJoin" style="margin-top:6px">招待コードで参加</button>
       </div>
+    `) : `
+      <p class="small">夫婦・家族でクローゼットを共有できる同期機能を準備中です。今のところは、この端末だけでご利用いただけます。</p>
     `}
   </div>
 
@@ -732,14 +736,14 @@ function renderSettings(){
   </div>`;
 
   $("#nameSave").onclick=()=>{ mutate(["meta","names"],{a:$("#nameA").value.trim()||"夫", b:$("#nameB").value.trim()||"妻"}); if(!syncOn()) renderSettings(); };
-  if(sync){
+  if(SYNC_UI_ENABLED && sync){
     $("#btnInvite").onclick=()=>copyText(inviteCode(), $("#btnInvite"), "✅ コピーしました(相手に送る)");
     $("#btnUnsync").onclick=()=>{
       if(!confirm("同期を解除しますか?(データはFirebase側に残ります)")) return;
       if(fbRef){ fbRef.off(); fbRef=null; }
       S.settings.cfg=null; S.settings.rid=null; connected=false; ROOM=S.local; save(); render();
     };
-  }else{
+  }else if(SYNC_UI_ENABLED){
     $("#btnNewRoom").onclick=()=>{
       const p=parseConfig($("#cfgArea").value);
       if(!p){ alert("構成(config)を読み取れませんでした。firebaseConfig 全体を貼り付けてください。"); return; }
