@@ -1,39 +1,12 @@
-const CACHE = "sentaku-v1";
-const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
-
-self.addEventListener("install", e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
-});
-self.addEventListener("activate", e => {
-  e.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k.startsWith("sentaku-") && k !== CACHE).map(k => caches.delete(k))))
-      .then(() => self.clients.claim())
-  );
-});
-self.addEventListener("fetch", e => {
-  if (e.request.method !== "GET") return;
-  const url = new URL(e.request.url);
-  // Firebase同期とGemini APIの通信はキャッシュしない
-  if (url.hostname.endsWith("firebasedatabase.app") || url.hostname.endsWith("firebaseio.com") ||
-      url.hostname.endsWith("googleapis.com")) return;
-  if (e.request.mode === "navigate") {
-    e.respondWith(
-      fetch(e.request).then(res => {
-        const clone = res.clone();
-        caches.open(CACHE).then(c => c.put("./index.html", clone));
-        return res;
-      }).catch(() => caches.match("./index.html"))
-    );
-    return;
-  }
-  e.respondWith(
-    caches.match(e.request).then(r => r || fetch(e.request).then(res => {
-      if (res && (res.ok || res.type === "opaque")) {
-        const clone = res.clone();
-        caches.open(CACHE).then(c => c.put(e.request, clone));
-      }
-      return res;
-    }))
-  );
+// 2026-09-29: この場所は正式版 https://gryo1240.github.io/rinne-apps/sentaku/ に移転した。
+// 古い版（sentaku-v1）を覚えている端末で、キャッシュを消して登録を外し、開いている画面を正式版へ移す。
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (e) => {
+  e.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((k) => k === "sentaku-v1").map((k) => caches.delete(k)));
+    await self.registration.unregister();
+    const wins = await self.clients.matchAll({ type: "window" });
+    wins.forEach((c) => { try { c.navigate("https://gryo1240.github.io/rinne-apps/sentaku/"); } catch (err) {} });
+  })());
 });
